@@ -2,10 +2,13 @@
 
 import time
 import threading
-from typing import Callable, Optional, Dict, Tuple
+from typing import Callable, Optional, Dict, Tuple, TYPE_CHECKING
 from queue import Queue, Empty
 from pynput import keyboard
 from .config import VBandConfig, PaddleType
+
+if TYPE_CHECKING:
+    from .keyer import IambicKeyer
 
 
 class PaddleEvent:
@@ -64,6 +67,13 @@ class PaddleInterface:
             "last_was_dit": True,
         }
 
+        # Initialize keyer for iambic modes
+        self._keyer: Optional["IambicKeyer"] = None
+        if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
+            # Local import to avoid circular dependency
+            from .keyer import IambicKeyer
+            self._keyer = IambicKeyer(self.config)
+
     def start(self) -> None:
         """Start listening for paddle input."""
         if self._running:
@@ -75,6 +85,10 @@ class PaddleInterface:
         )
         self._listener.start()
 
+        # Start keyer if using iambic mode
+        if self._keyer:
+            self._keyer.start()
+
     def stop(self) -> None:
         """Stop listening for paddle input."""
         if not self._running:
@@ -84,6 +98,10 @@ class PaddleInterface:
         if self._listener:
             self._listener.stop()
             self._listener = None
+
+        # Stop keyer if using iambic mode
+        if self._keyer:
+            self._keyer.stop()
 
     def _is_dit_key(self, key: keyboard.Key) -> bool:
         """Check if key is the dit key (left control)."""
@@ -117,9 +135,9 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=True, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Handle iambic modes
-                if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
-                    self._iambic_state["dit_pending"] = True
+                # Update keyer state if using iambic mode
+                if self._keyer:
+                    self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
         # Check for dah key
         elif self._is_dah_key(key):
@@ -133,9 +151,9 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=False, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Handle iambic modes
-                if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
-                    self._iambic_state["dah_pending"] = True
+                # Update keyer state if using iambic mode
+                if self._keyer:
+                    self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
     def _on_key_release(self, key: keyboard.Key) -> None:
         """
@@ -156,9 +174,9 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=True, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Clear dit pending in iambic mode
-                if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
-                    self._iambic_state["dit_pending"] = False
+                # Update keyer state if using iambic mode
+                if self._keyer:
+                    self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
         # Check for dah key
         elif self._is_dah_key(key):
@@ -167,9 +185,9 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=False, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Clear dah pending in iambic mode
-                if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
-                    self._iambic_state["dah_pending"] = False
+                # Update keyer state if using iambic mode
+                if self._keyer:
+                    self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
     def get_event(self, timeout: Optional[float] = None) -> Optional[PaddleEvent]:
         """
@@ -194,6 +212,34 @@ class PaddleInterface:
             Tuple of (dit_pressed, dah_pressed)
         """
         return (self._dit_pressed, self._dah_pressed)
+
+    def has_keyer(self) -> bool:
+        """
+        Check if this interface has an active keyer.
+
+        Returns:
+            True if using iambic mode with keyer
+        """
+        return self._keyer is not None
+
+    def get_keyed_element(self, timeout: Optional[float] = None):
+        """
+        Get the next keyed element from the iambic keyer.
+
+        Only available when using iambic mode (A or B).
+
+        Args:
+            timeout: Maximum time to wait in seconds, None for blocking
+
+        Returns:
+            CWElement or None if timeout or not using keyer
+
+        Raises:
+            RuntimeError: If called when not using iambic mode
+        """
+        if not self._keyer:
+            raise RuntimeError("Keyer not available - not in iambic mode")
+        return self._keyer.get_element(timeout=timeout)
 
     def is_running(self) -> bool:
         """Check if the interface is running."""
