@@ -5,7 +5,7 @@ import argparse
 import signal
 from typing import Optional
 from .config import VBandConfig, PaddleType
-from .stream import DecodedStream, CWStream, print_element, print_character, play_audio_element
+from .stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -110,6 +110,11 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 
+def print_pair(pair):
+    """Print a space/mark pair to stdout."""
+    print(f"({pair.space_ms:.0f},{pair.mark_ms:.0f}) ", end="", flush=True)
+
+
 def main() -> int:
     """Main entry point for CLI."""
     parser = create_parser()
@@ -136,6 +141,9 @@ def main() -> int:
     print("=" * 50, file=sys.stderr)
     print("", file=sys.stderr)
 
+    # Determine which stream to use based on keyer configuration
+    use_spacemark = getattr(config, 'use_spacemark_keyer', True)
+
     try:
         if args.raw:
             # Show only raw dit/dah stream
@@ -150,33 +158,61 @@ def main() -> int:
 
         elif args.both:
             # Show both raw and decoded
-            print("Raw: ", end="", flush=True)
-
-            def both_element(element):
-                print_element(element)
-                if args.audio:
-                    play_audio_element(element)
-
-            def both_char(char):
-                print(f"\nDecoded: {char}", flush=True)
+            if use_spacemark:
+                # Use SpaceMarkStream
                 print("Raw: ", end="", flush=True)
 
-            with DecodedStream(
-                config=config, char_callback=both_char, element_callback=both_element
-            ) as stream:
-                while stream.is_running():
-                    signal.pause()
+                def both_pair(pair):
+                    print_pair(pair)
+
+                def both_char_sm(char):
+                    print(f"\nDecoded: {char}", flush=True)
+                    print("Raw: ", end="", flush=True)
+
+                with SpaceMarkStream(
+                    config=config, char_callback=both_char_sm, pair_callback=both_pair
+                ) as stream:
+                    while stream.is_running():
+                        signal.pause()
+            else:
+                # Use DecodedStream (legacy)
+                print("Raw: ", end="", flush=True)
+
+                def both_element(element):
+                    print_element(element)
+                    if args.audio:
+                        play_audio_element(element)
+
+                def both_char(char):
+                    print(f"\nDecoded: {char}", flush=True)
+                    print("Raw: ", end="", flush=True)
+
+                with DecodedStream(
+                    config=config, char_callback=both_char, element_callback=both_element
+                ) as stream:
+                    while stream.is_running():
+                        signal.pause()
 
         else:
             # Show only decoded characters (default)
-            element_callback = play_audio_element if args.audio else None
-            with DecodedStream(
-                config=config,
-                char_callback=print_character,
-                element_callback=element_callback,
-            ) as stream:
-                while stream.is_running():
-                    signal.pause()
+            if use_spacemark:
+                # Use SpaceMarkStream
+                with SpaceMarkStream(
+                    config=config,
+                    char_callback=print_character,
+                ) as stream:
+                    while stream.is_running():
+                        signal.pause()
+            else:
+                # Use DecodedStream (legacy)
+                element_callback = play_audio_element if args.audio else None
+                with DecodedStream(
+                    config=config,
+                    char_callback=print_character,
+                    element_callback=element_callback,
+                ) as stream:
+                    while stream.is_running():
+                        signal.pause()
 
     except KeyboardInterrupt:
         print("\n\nStopping VBAND...", file=sys.stderr)
