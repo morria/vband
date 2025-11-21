@@ -7,6 +7,14 @@ from .paddle import PaddleInterface, PaddleEvent
 from .decoder import CWDecoder, CWElement, MorseDecoder
 from .config import VBandConfig
 
+# Try to import audio module, but make it optional
+try:
+    from .audio import play_element
+    _AUDIO_AVAILABLE = True
+except (ImportError, OSError):
+    _AUDIO_AVAILABLE = False
+    play_element = None
+
 
 class CWStream:
     """
@@ -211,3 +219,14 @@ def print_character(char: str) -> None:
         char: Character to print
     """
     print(char, end="", flush=True)
+
+
+def play_audio_element(element: CWElement) -> None:
+    """
+    Play audio for a CW element.
+
+    Args:
+        element: CW element to play audio for
+    """
+    if _AUDIO_AVAILABLE and play_element is not None:
+        play_element(element.is_dit)
