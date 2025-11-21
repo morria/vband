@@ -5,11 +5,12 @@ A Python package for interfacing with the VBAND USB CW paddle adapter, providing
 ## Features
 
 - **Multiple Paddle Types**: Support for straight keys, dual paddles, and iambic modes (A & B)
-- **Real-time Decoding**: Live conversion of CW input to characters
-- **Auto-WPM Detection**: Automatically adjusts to operator's sending speed
-- **Flexible Output**: Choose between raw dit/dah stream or decoded characters
+- **Near Real-Time Decoding**: Space/mark pair architecture based on vband.org reference implementation
+- **Adaptive WPM Detection**: Aggressively learns operator's speed using timing analysis
+- **Flexible Output**: Choose between raw dit/dah stream, space/mark pairs, or decoded characters
 - **Configurable Timing**: Adjustable character and word spacing thresholds
 - **Simple API**: Easy-to-use Python interface and CLI tool
+- **Binary Tree Morse Decoder**: Fast character lookup using bit-encoded morse patterns
 
 ## Installation
 
@@ -42,6 +43,35 @@ vband --both --wpm 15
 ```
 
 ### Python API
+
+#### Near Real-Time Decoding (Recommended)
+
+Uses space/mark pair architecture for optimal performance:
+
+```python
+from vband import VBandConfig, SpaceMarkStream, PaddleType
+
+# Create configuration
+config = VBandConfig(
+    paddle_type=PaddleType.IAMBIC_B,
+    auto_wpm=True,
+)
+config.set_wpm(20)
+
+# Define callback for decoded characters
+def on_character(char: str):
+    print(char, end="", flush=True)
+
+# Start near real-time decoding stream
+with SpaceMarkStream(config=config, char_callback=on_character) as stream:
+    while stream.is_running():
+        time.sleep(0.1)
+        print(f"WPM: {stream.get_wpm()}")
+```
+
+#### Standard Decoding
+
+Traditional element-based decoding:
 
 ```python
 from vband import VBandConfig, DecodedStream, PaddleType
@@ -118,6 +148,15 @@ Configuration object for paddle interface and decoder settings.
 #### `PaddleInterface`
 Low-level interface for capturing paddle events from USB device.
 
+#### `SpaceMarkStream` (Recommended)
+Near real-time stream of decoded morse code using space/mark pairs. Implements the vband.org reference architecture for optimal performance with adaptive WPM detection.
+
+#### `SpaceMarkDecoder`
+Adaptive decoder that processes space/mark timing pairs. Features aggressive WPM learning and binary tree morse lookup.
+
+#### `SpaceMarkKeyer`
+State machine keyer that generates space/mark timing pairs for all paddle types (straight key, bug, iambic A/B).
+
 #### `CWDecoder`
 Converts paddle events into CW elements (dits and dahs) with timing analysis.
 
@@ -134,9 +173,37 @@ Real-time stream of decoded characters with optional element callbacks.
 
 See the `examples/` directory for complete examples:
 
+- `spacemark_decode.py` - Near real-time decoding with space/mark architecture (recommended)
 - `basic_usage.py` - Simple character decoding
 - `realtime_decode.py` - Shows both raw and decoded output
 - `raw_stream.py` - Raw dit/dah stream only
+
+## Architecture
+
+### Space/Mark Decoding (vband.org Reference Implementation)
+
+The recommended `SpaceMarkStream` uses a space/mark pair architecture based on the vband.org web application:
+
+1. **SpaceMarkKeyer** - Tracks paddle state transitions and generates timing pairs:
+   - Each pair contains: `(space_duration, mark_duration)` in milliseconds
+   - Works with all paddle types: straight key, bug, iambic A/B
+
+2. **SpaceMarkDecoder** - Processes timing pairs with adaptive learning:
+   - **Aggressive WPM Detection**: Compares consecutive marks that differ by 2X to learn dit length
+   - **Adaptive Spacing**: Learns inter-character spacing from observed gaps
+   - **Binary Tree Lookup**: Uses bit-encoded morse patterns for fast character decoding
+   - **Auto-Flush Timer**: Completes characters automatically after timing threshold
+
+3. **Near Real-Time Performance**: By processing complete timing pairs immediately, decoding happens as soon as each element completes, providing the fastest possible character output.
+
+### Traditional Element-Based Decoding
+
+The original `DecodedStream` uses a traditional approach:
+1. Captures key press/release events
+2. Builds CW elements (dits/dahs)
+3. Waits for gaps to decode characters
+
+This approach works well but has slightly higher latency compared to space/mark decoding.
 
 ## Testing
 
