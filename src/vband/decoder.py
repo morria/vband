@@ -324,9 +324,10 @@ class SpaceMarkDecoder:
         self.config = config or VBandConfig()
 
         # Timing parameters (in milliseconds)
-        self.dit_length = 1200.0 / 15.0  # 15 WPM default (80ms)
-        self.last_mark = 120.0
-        self.char_space = (3.0 * 1200.0) / 80.0  # ~45ms
+        # Use config's dit_duration (convert from seconds to milliseconds)
+        self.dit_length = self.config.dit_duration * 1000.0
+        self.last_mark = self.dit_length * 1.2  # Slightly longer than a dit
+        self.char_space = self.dit_length * 3.0  # Character space is 3x dit
 
         # Decoder state
         self.morse_ch = 1  # Current character in binary tree
