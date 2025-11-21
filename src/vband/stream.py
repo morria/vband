@@ -59,15 +59,22 @@ class CWStream:
     def _process_loop(self) -> None:
         """Main processing loop."""
         while self._running:
-            # Get paddle event with timeout
-            event = self.paddle.get_event(timeout=0.1)
-            if event is None:
-                continue
+            # Check if using keyer for iambic mode
+            if self.paddle.has_keyer():
+                # Get keyed element directly
+                element = self.paddle.get_keyed_element(timeout=0.1)
+                if element and self.callback:
+                    self.callback(element)
+            else:
+                # Get paddle event with timeout
+                event = self.paddle.get_event(timeout=0.1)
+                if event is None:
+                    continue
 
-            # Process event to get CW element
-            element = self.decoder.process_event(event)
-            if element and self.callback:
-                self.callback(element)
+                # Process event to get CW element
+                element = self.decoder.process_event(event)
+                if element and self.callback:
+                    self.callback(element)
 
     def is_running(self) -> bool:
         """Check if the stream is running."""
@@ -140,24 +147,30 @@ class DecodedStream:
         last_check = time.time()
 
         while self._running:
-            # Get paddle event with timeout
-            event = self.paddle.get_event(timeout=0.05)
-
             current_time = time.time()
+            element = None
 
-            if event:
-                # Process event to get CW element
-                element = self.cw_decoder.process_event(event)
+            # Check if using keyer for iambic mode
+            if self.paddle.has_keyer():
+                # Get keyed element directly
+                element = self.paddle.get_keyed_element(timeout=0.05)
+            else:
+                # Get paddle event with timeout
+                event = self.paddle.get_event(timeout=0.05)
 
-                if element:
-                    # Call element callback if configured
-                    if self.element_callback:
-                        self.element_callback(element)
+                if event:
+                    # Process event to get CW element
+                    element = self.cw_decoder.process_event(event)
 
-                    # Decode to character
-                    char = self.morse_decoder.process_element(element, current_time)
-                    if char and self.char_callback:
-                        self.char_callback(char)
+            if element:
+                # Call element callback if configured
+                if self.element_callback:
+                    self.element_callback(element)
+
+                # Decode to character
+                char = self.morse_decoder.process_element(element, current_time)
+                if char and self.char_callback:
+                    self.char_callback(char)
 
             # Periodically check for character timeout
             if current_time - last_check > 0.1:

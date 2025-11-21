@@ -103,3 +103,35 @@ class TestPaddleInterface:
         paddle.stop()
         paddle.stop()  # Should not cause issues
         assert paddle.is_running() is False
+
+    def test_iambic_mode_has_keyer(self):
+        """Test that iambic mode B creates a keyer."""
+        config = VBandConfig(paddle_type=PaddleType.IAMBIC_B)
+        paddle = PaddleInterface(config)
+        assert paddle.has_keyer() is True
+
+    def test_dual_paddle_no_keyer(self):
+        """Test that dual paddle mode does not create a keyer."""
+        config = VBandConfig(paddle_type=PaddleType.DUAL_PADDLE)
+        paddle = PaddleInterface(config)
+        assert paddle.has_keyer() is False
+
+    def test_get_keyed_element_without_keyer(self):
+        """Test that getting keyed element without keyer raises error."""
+        config = VBandConfig(paddle_type=PaddleType.DUAL_PADDLE)
+        paddle = PaddleInterface(config)
+        with pytest.raises(RuntimeError):
+            paddle.get_keyed_element(timeout=0.1)
+
+    def test_keyer_starts_with_paddle(self):
+        """Test that keyer starts when paddle starts in iambic mode."""
+        config = VBandConfig(paddle_type=PaddleType.IAMBIC_B)
+        paddle = PaddleInterface(config)
+
+        paddle.start()
+        assert paddle.has_keyer() is True
+        # Keyer should be running when paddle is running
+        assert paddle.is_running() is True
+
+        paddle.stop()
+        assert paddle.is_running() is False
