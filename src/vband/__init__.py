@@ -6,10 +6,10 @@ supporting various paddle types and real-time CW decoding.
 """
 
 from .paddle import PaddleType, PaddleInterface
-from .decoder import CWDecoder, MorseDecoder
-from .stream import CWStream, DecodedStream
+from .decoder import CWDecoder, MorseDecoder, SpaceMarkDecoder, SpaceMarkPair
+from .stream import CWStream, DecodedStream, SpaceMarkStream
 from .config import VBandConfig
-from .keyer import IambicKeyer
+from .keyer import IambicKeyer, SpaceMarkKeyer
 
 # Audio module is optional (requires PortAudio)
 try:
@@ -25,10 +25,14 @@ __all__ = [
     "PaddleInterface",
     "CWDecoder",
     "MorseDecoder",
+    "SpaceMarkDecoder",
+    "SpaceMarkPair",
     "CWStream",
     "DecodedStream",
+    "SpaceMarkStream",
     "VBandConfig",
     "IambicKeyer",
+    "SpaceMarkKeyer",
 ]
 
 if _audio_available:

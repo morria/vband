@@ -69,8 +69,14 @@ class PaddleInterface:
 
         # Initialize keyer for iambic modes
         self._keyer: Optional["IambicKeyer"] = None
-        if self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
-            # Local import to avoid circular dependency
+        self._spacemark_keyer: Optional["SpaceMarkKeyer"] = None
+
+        # Use SpaceMarkKeyer for all paddle types if enabled
+        if getattr(self.config, 'use_spacemark_keyer', True):
+            from .keyer import SpaceMarkKeyer
+            self._spacemark_keyer = SpaceMarkKeyer(self.config)
+        elif self.config.paddle_type in (PaddleType.IAMBIC_A, PaddleType.IAMBIC_B):
+            # Fallback to old IambicKeyer
             from .keyer import IambicKeyer
             self._keyer = IambicKeyer(self.config)
 
@@ -85,8 +91,10 @@ class PaddleInterface:
         )
         self._listener.start()
 
-        # Start keyer if using iambic mode
-        if self._keyer:
+        # Start keyer
+        if self._spacemark_keyer:
+            self._spacemark_keyer.start()
+        elif self._keyer:
             self._keyer.start()
 
     def stop(self) -> None:
@@ -99,8 +107,10 @@ class PaddleInterface:
             self._listener.stop()
             self._listener = None
 
-        # Stop keyer if using iambic mode
-        if self._keyer:
+        # Stop keyer
+        if self._spacemark_keyer:
+            self._spacemark_keyer.stop()
+        elif self._keyer:
             self._keyer.stop()
 
     def _is_dit_key(self, key: keyboard.Key) -> bool:
@@ -135,8 +145,10 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=True, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Update keyer state if using iambic mode
-                if self._keyer:
+                # Update keyer state
+                if self._spacemark_keyer:
+                    self._spacemark_keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
+                elif self._keyer:
                     self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
         # Check for dah key
@@ -151,8 +163,10 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=False, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Update keyer state if using iambic mode
-                if self._keyer:
+                # Update keyer state
+                if self._spacemark_keyer:
+                    self._spacemark_keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
+                elif self._keyer:
                     self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
     def _on_key_release(self, key: keyboard.Key) -> None:
@@ -174,8 +188,10 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=True, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Update keyer state if using iambic mode
-                if self._keyer:
+                # Update keyer state
+                if self._spacemark_keyer:
+                    self._spacemark_keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
+                elif self._keyer:
                     self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
         # Check for dah key
@@ -185,8 +201,10 @@ class PaddleInterface:
                 event = PaddleEvent(is_dit=False, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
 
-                # Update keyer state if using iambic mode
-                if self._keyer:
+                # Update keyer state
+                if self._spacemark_keyer:
+                    self._spacemark_keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
+                elif self._keyer:
                     self._keyer.update_paddle_state(self._dit_pressed, self._dah_pressed)
 
     def get_event(self, timeout: Optional[float] = None) -> Optional[PaddleEvent]:
@@ -218,9 +236,37 @@ class PaddleInterface:
         Check if this interface has an active keyer.
 
         Returns:
-            True if using iambic mode with keyer
+            True if using any keyer mode
         """
-        return self._keyer is not None
+        return self._keyer is not None or self._spacemark_keyer is not None
+
+    def has_spacemark_keyer(self) -> bool:
+        """
+        Check if this interface has an active space/mark keyer.
+
+        Returns:
+            True if using space/mark keyer
+        """
+        return self._spacemark_keyer is not None
+
+    def get_space_mark_pair(self, timeout: Optional[float] = None):
+        """
+        Get the next space/mark pair from the space/mark keyer.
+
+        Only available when using space/mark keyer.
+
+        Args:
+            timeout: Maximum time to wait in seconds, None for blocking
+
+        Returns:
+            SpaceMarkPair or None if timeout or not using keyer
+
+        Raises:
+            RuntimeError: If called when not using space/mark keyer
+        """
+        if not self._spacemark_keyer:
+            raise RuntimeError("Space/mark keyer not available")
+        return self._spacemark_keyer.get_space_mark_pair(timeout=timeout)
 
     def get_keyed_element(self, timeout: Optional[float] = None):
         """

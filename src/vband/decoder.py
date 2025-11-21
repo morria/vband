@@ -1,6 +1,7 @@
 """CW decoder module for converting paddle events to morse code."""
 
 import time
+import threading
 from typing import Optional, List, Dict
 from collections import deque
 from .paddle import PaddleEvent
@@ -274,3 +275,281 @@ class MorseDecoder:
         """Reset decoder state."""
         self._current_char = []
         self._last_element_time = None
+
+
+# Binary tree-encoded morse table from reference implementation
+# Each character's position in the tree is encoded by its morse pattern
+# Starting at index 1, left (dit) = 2*i, right (dah) = 2*i+1
+MORSE_TREE = (
+    "**ETIANMSURWDKGOHVF\x9cL\xc4PJBXCYZQ\xd6\xe454\x9d3\xc9*\xc22&\xc8+*\xde\xc3\xf434" +
+    "16=/*\xc6^(*7\xbb\xe3\xd18*90" +
+    "*****|******?_****\"*\xb6.****@***'**-********;!*)****\xb9,****:*******"
+)
+
+
+class SpaceMarkPair:
+    """Represents a space/mark timing pair for CW decoding."""
+
+    def __init__(self, space_ms: float, mark_ms: float):
+        """
+        Initialize space/mark pair.
+
+        Args:
+            space_ms: Duration of space before mark in milliseconds
+            mark_ms: Duration of mark in milliseconds
+        """
+        self.space_ms = space_ms
+        self.mark_ms = mark_ms
+
+    def __repr__(self) -> str:
+        return f"SpaceMarkPair(space={self.space_ms:.1f}ms, mark={self.mark_ms:.1f}ms)"
+
+
+class SpaceMarkDecoder:
+    """
+    Near real-time CW decoder using space/mark pairs.
+
+    This decoder implements the adaptive algorithm from the vband.org reference
+    implementation, providing near real-time character decoding with automatic
+    WPM adjustment.
+    """
+
+    def __init__(self, config: Optional[VBandConfig] = None):
+        """
+        Initialize space/mark decoder.
+
+        Args:
+            config: Configuration object, uses defaults if None
+        """
+        self.config = config or VBandConfig()
+
+        # Timing parameters (in milliseconds)
+        self.dit_length = 1200.0 / 15.0  # 15 WPM default (80ms)
+        self.last_mark = 120.0
+        self.char_space = (3.0 * 1200.0) / 80.0  # ~45ms
+
+        # Decoder state
+        self.morse_ch = 1  # Current character in binary tree
+        self.decoded_text = ""
+        self._flush_timer: Optional[threading.Timer] = None
+        self._timer_lock = threading.Lock()
+
+        # History for analysis
+        self.history: List[Dict] = []
+        self._save_space_type: Optional[int] = None
+        self._save_space_duration: float = 0.0
+
+    def decode_space_mark(self, space_ms: float, mark_ms: float) -> Optional[str]:
+        """
+        Decode a space/mark pair and return any completed characters.
+
+        This is the main entry point that processes timing pairs in real-time.
+
+        Args:
+            space_ms: Duration of space before mark in milliseconds
+            mark_ms: Duration of mark in milliseconds
+
+        Returns:
+            Decoded character(s) or None if character incomplete
+        """
+        # Process the space
+        space_result = self._decode_space(space_ms)
+
+        # Process the mark
+        self._decode_mark(mark_ms)
+
+        return space_result
+
+    def _decode_space(self, duration: float) -> Optional[str]:
+        """
+        Decode a space and return characters if spacing threshold crossed.
+
+        Args:
+            duration: Space duration in milliseconds
+
+        Returns:
+            Decoded character(s), space, or None
+        """
+        self._clear_flush_timer()
+        space_type = 2  # INTER_ELEMENT
+        result = None
+
+        # Check for end of character
+        if duration > self.dit_length * 2.0:
+            result = self._flush_character()
+
+            # Determine if inter-char or inter-word space
+            word_space = (self.char_space / 3.0) * 5.5
+            max_time = 3000.0  # Maximum tracked time
+
+            if duration >= word_space or duration >= max_time:
+                # Inter-word space
+                if result:
+                    result += " "
+                else:
+                    result = " "
+
+                # Slow down char spacing slightly (helps with consistency)
+                self.char_space *= 1.03
+                space_type = 4  # INTER_WORD
+            else:
+                # Inter-character space - adjust char_space adaptively
+                if duration < self.char_space:
+                    # Approach smaller value quicker
+                    self.char_space = self.char_space * 0.5 + duration * 0.5
+                else:
+                    # Approach larger value slower
+                    self.char_space = self.char_space * 0.8 + duration * 0.2
+                space_type = 3  # INTER_CHAR
+
+        self._add_to_history(space_type, duration, is_mark=False)
+        return result
+
+    def _decode_mark(self, duration: float) -> None:
+        """
+        Decode a mark (dit or dah) and update character state.
+
+        Args:
+            duration: Mark duration in milliseconds
+        """
+        self.morse_ch *= 2
+
+        # Determine dit or dah
+        mark_type = 0  # DIT
+        if duration > self.dit_length * 1.7:
+            mark_type = 1  # DAH
+            self.morse_ch += 1
+
+        # Adaptive learning: when current and last mark differ by 2X,
+        # average and divide by 2 to get new dit length
+        if duration > 2.0 * self.last_mark or self.last_mark > 2.0 * duration:
+            new_dit = ((self.last_mark + duration) / 4.0 + self.dit_length) / 2.0
+            self.dit_length = new_dit
+
+            # Ensure char_space is at least 2.5 * dit_length
+            if self.char_space < self.dit_length * 2.5:
+                self.char_space = self.dit_length * 2.5
+
+        self.last_mark = duration
+
+        # Set flush timer for automatic character completion
+        self._clear_flush_timer()
+        with self._timer_lock:
+            self._flush_timer = threading.Timer(
+                self.dit_length * 8.0 / 1000.0,  # Convert to seconds
+                self._flush_timer_expired
+            )
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
+
+        self._add_to_history(mark_type, duration, is_mark=True)
+
+    def _flush_character(self) -> Optional[str]:
+        """
+        Flush the current character and return it.
+
+        Returns:
+            Decoded character or None
+        """
+        self._clear_flush_timer()
+
+        if self.morse_ch <= 1:
+            return None
+
+        ch = "*"  # Unknown character marker
+
+        # Handle special extended characters
+        if self.morse_ch == 0x89:
+            # $ = ...-..-  (binary: 1000 1001)
+            ch = "$"
+        elif self.morse_ch == 0xc5:
+            # <BK> ~ = -...-.-  (binary: 1100 0101)
+            ch = "~"
+        elif self.morse_ch < len(MORSE_TREE):
+            ch = MORSE_TREE[self.morse_ch]
+
+        self.decoded_text += ch
+        self.morse_ch = 1
+        return ch
+
+    def _flush_timer_expired(self) -> None:
+        """Callback when flush timer expires."""
+        self._flush_character()
+
+    def _clear_flush_timer(self) -> None:
+        """Clear the flush timer if active."""
+        with self._timer_lock:
+            if self._flush_timer is not None:
+                self._flush_timer.cancel()
+                self._flush_timer = None
+
+    def _add_to_history(self, type_: int, duration: float, is_mark: bool) -> None:
+        """
+        Add timing information to history.
+
+        Args:
+            type_: Type code (0=DIT, 1=DAH, 2=INTER_ELEMENT, 3=INTER_CHAR, 4=INTER_WORD)
+            duration: Duration in milliseconds
+            is_mark: True if this is a mark, False if space
+        """
+        if is_mark:
+            # Add mark with saved space
+            self.history.append({
+                'space_type': self._save_space_type,
+                'space_duration': self._save_space_duration,
+                'mark_type': type_,
+                'mark_duration': duration,
+            })
+            self._save_space_type = None
+            self._save_space_duration = 0.0
+        else:
+            # Save space for next mark
+            self._save_space_type = type_
+            self._save_space_duration = duration
+
+    def get_text(self) -> str:
+        """
+        Get all decoded text.
+
+        Returns:
+            Decoded text string
+        """
+        return self.decoded_text
+
+    def get_wpm_string(self) -> str:
+        """
+        Get current WPM as a formatted string.
+
+        Returns:
+            WPM string in format "dit_wpm/eff_wpm WPM"
+        """
+        dit_wpm = 1200.0 / self.dit_length
+        char_wpm = (3.0 * 1200.0) / self.char_space
+        eff_wpm = (50.0 / (31.0 / dit_wpm + 19.0 / char_wpm))
+        return f"{dit_wpm:.1f}/{eff_wpm:.1f} WPM"
+
+    def get_dit_length_ms(self) -> float:
+        """Get current dit length in milliseconds."""
+        return self.dit_length
+
+    def get_char_space_ms(self) -> float:
+        """Get current character space in milliseconds."""
+        return self.char_space
+
+    def clear(self) -> None:
+        """Clear all decoder state."""
+        self._clear_flush_timer()
+        self.decoded_text = ""
+        self.morse_ch = 1
+        self.history = []
+        self._save_space_type = None
+        self._save_space_duration = 0.0
+
+    def flush(self) -> Optional[str]:
+        """
+        Manually flush any pending character.
+
+        Returns:
+            Decoded character or None
+        """
+        return self._flush_character()
