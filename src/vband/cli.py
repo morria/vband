@@ -5,7 +5,7 @@ import argparse
 import signal
 from typing import Optional
 from .config import VBandConfig, PaddleType
-from .stream import DecodedStream, CWStream, print_element, print_character
+from .stream import DecodedStream, CWStream, print_element, print_character, play_audio_element
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -18,8 +18,11 @@ Examples:
   # Decode morse code to characters at 20 WPM
   vband --wpm 20
 
-  # Show raw dit/dah stream
-  vband --raw
+  # Show raw dit/dah stream with audio feedback
+  vband --raw --audio
+
+  # Decode with audio feedback
+  vband --audio
 
   # Use iambic mode A with auto-WPM detection
   vband --paddle iambic_a --auto-wpm
@@ -72,6 +75,12 @@ Paddle Types:
         "--both",
         action="store_true",
         help="Show both raw dit/dah and decoded characters",
+    )
+
+    parser.add_argument(
+        "--audio",
+        action="store_true",
+        help="Enable audio feedback for dits and dahs",
     )
 
     parser.add_argument(
@@ -130,7 +139,12 @@ def main() -> int:
     try:
         if args.raw:
             # Show only raw dit/dah stream
-            with CWStream(config=config, callback=print_element) as stream:
+            def raw_callback(element):
+                print_element(element)
+                if args.audio:
+                    play_audio_element(element)
+
+            with CWStream(config=config, callback=raw_callback) as stream:
                 while stream.is_running():
                     signal.pause()
 
@@ -140,6 +154,8 @@ def main() -> int:
 
             def both_element(element):
                 print_element(element)
+                if args.audio:
+                    play_audio_element(element)
 
             def both_char(char):
                 print(f"\nDecoded: {char}", flush=True)
@@ -153,7 +169,12 @@ def main() -> int:
 
         else:
             # Show only decoded characters (default)
-            with DecodedStream(config=config, char_callback=print_character) as stream:
+            element_callback = play_audio_element if args.audio else None
+            with DecodedStream(
+                config=config,
+                char_callback=print_character,
+                element_callback=element_callback,
+            ) as stream:
                 while stream.is_running():
                     signal.pause()
 

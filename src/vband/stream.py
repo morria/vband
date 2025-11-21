@@ -6,6 +6,7 @@ from typing import Optional, Callable, Union
 from .paddle import PaddleInterface, PaddleEvent
 from .decoder import CWDecoder, CWElement, MorseDecoder
 from .config import VBandConfig
+from .audio import play_element
 
 
 class CWStream:
@@ -198,3 +199,13 @@ def print_character(char: str) -> None:
         char: Character to print
     """
     print(char, end="", flush=True)
+
+
+def play_audio_element(element: CWElement) -> None:
+    """
+    Play audio for a CW element.
+
+    Args:
+        element: CW element to play audio for
+    """
+    play_element(element.is_dit)

@@ -9,6 +9,7 @@ from .paddle import PaddleType, PaddleInterface
 from .decoder import CWDecoder, MorseDecoder
 from .stream import CWStream, DecodedStream
 from .config import VBandConfig
+from .audio import CWAudio
 
 __version__ = "0.1.0"
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "CWStream",
     "DecodedStream",
     "VBandConfig",
+    "CWAudio",
 ]
