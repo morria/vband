@@ -4,8 +4,20 @@ import sys
 import argparse
 import signal
 from typing import Optional
-from .config import VBandConfig, PaddleType
-from .stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
+
+# Handle both direct script execution and module import
+if __name__ == "__main__" and __package__ is None:
+    # Running as script directly, fix imports
+    from pathlib import Path
+    src_path = Path(__file__).resolve().parent.parent
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+    from vband.config import VBandConfig, PaddleType
+    from vband.stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
+else:
+    # Running as module, use relative imports
+    from .config import VBandConfig, PaddleType
+    from .stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
 
 
 def create_parser() -> argparse.ArgumentParser:
