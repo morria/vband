@@ -232,6 +232,27 @@ def play_audio_element(element: CWElement) -> None:
         play_element(element.is_dit)
 
 
+def play_audio_mark(mark_ms: float) -> None:
+    """
+    Play audio for a mark based on its duration.
+
+    Determines if the mark is a dit or dah based on duration
+    and plays the appropriate audio tone.
+
+    Args:
+        mark_ms: Mark duration in milliseconds
+    """
+    if not _AUDIO_AVAILABLE or play_element is None:
+        return
+
+    # Use a threshold of 2x to distinguish between dit and dah
+    # A dah is typically 3x the length of a dit, so 2x is a good midpoint
+    # Assume a typical dit is around 60-100ms (12-20 WPM range)
+    # This heuristic works because marks are either dits (~60-120ms) or dahs (~180-360ms)
+    is_dit = mark_ms < 150
+    play_element(is_dit)
+
+
 class SpaceMarkStream:
     """
     Near real-time stream of decoded morse code using space/mark pairs.
@@ -247,6 +268,7 @@ class SpaceMarkStream:
         config: Optional[VBandConfig] = None,
         char_callback: Optional[Callable[[str], None]] = None,
         pair_callback: Optional[Callable[[SpaceMarkPair], None]] = None,
+        mark_callback: Optional[Callable[[float], None]] = None,
     ):
         """
         Initialize space/mark decoded stream.
@@ -255,12 +277,14 @@ class SpaceMarkStream:
             config: Configuration object, uses defaults if None
             char_callback: Optional callback for decoded characters
             pair_callback: Optional callback for space/mark pairs
+            mark_callback: Optional callback for mark durations (for audio feedback)
         """
         self.config = config or VBandConfig()
         self.paddle = PaddleInterface(self.config)
         self.decoder = SpaceMarkDecoder(self.config)
         self.char_callback = char_callback
         self.pair_callback = pair_callback
+        self.mark_callback = mark_callback
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -297,6 +321,10 @@ class SpaceMarkStream:
                     # Call pair callback if configured
                     if self.pair_callback:
                         self.pair_callback(pair)
+
+                    # Call mark callback if configured (for audio feedback)
+                    if self.mark_callback:
+                        self.mark_callback(pair.mark_ms)
 
                     # Decode the pair
                     char = self.decoder.decode_space_mark(pair.space_ms, pair.mark_ms)

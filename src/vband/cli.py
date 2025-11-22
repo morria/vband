@@ -13,11 +13,11 @@ if __name__ == "__main__" and __package__ is None:
     if str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
     from vband.config import VBandConfig, PaddleType
-    from vband.stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
+    from vband.stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element, play_audio_mark
 else:
     # Running as module, use relative imports
     from .config import VBandConfig, PaddleType
-    from .stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element
+    from .stream import DecodedStream, CWStream, SpaceMarkStream, print_element, print_character, play_audio_element, play_audio_mark
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -181,8 +181,9 @@ def main() -> int:
                     print(f"\nDecoded: {char}", flush=True)
                     print("Raw: ", end="", flush=True)
 
+                mark_callback = play_audio_mark if args.audio else None
                 with SpaceMarkStream(
-                    config=config, char_callback=both_char_sm, pair_callback=both_pair
+                    config=config, char_callback=both_char_sm, pair_callback=both_pair, mark_callback=mark_callback
                 ) as stream:
                     while stream.is_running():
                         signal.pause()
@@ -209,9 +210,11 @@ def main() -> int:
             # Show only decoded characters (default)
             if use_spacemark:
                 # Use SpaceMarkStream
+                mark_callback = play_audio_mark if args.audio else None
                 with SpaceMarkStream(
                     config=config,
                     char_callback=print_character,
+                    mark_callback=mark_callback,
                 ) as stream:
                     while stream.is_running():
                         signal.pause()
