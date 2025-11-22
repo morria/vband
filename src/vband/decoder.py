@@ -2,10 +2,15 @@
 
 import time
 import threading
+import sys
+import os
 from typing import Optional, List, Dict
 from collections import deque
 from .paddle import PaddleEvent
 from .config import VBandConfig
+
+# Debug logging flag - set VBAND_DEBUG=1 environment variable to enable
+DEBUG = os.environ.get('VBAND_DEBUG', '0') == '1'
 
 
 # International Morse Code table
@@ -330,9 +335,10 @@ class SpaceMarkDecoder:
         self.char_space = self._dit_length * 3.0  # Character space is 3x dit
 
         # Log initialization for debugging
-        import sys
-        wpm = round(1.2 / self.config.dit_duration) if self.config.dit_duration > 0 else 0
-        print(f"[SpaceMarkDecoder] Initialized for {wpm} WPM: dit={self._dit_length:.1f}ms, char_space={self.char_space:.1f}ms", file=sys.stderr)
+        if DEBUG:
+            wpm = round(1.2 / self.config.dit_duration) if self.config.dit_duration > 0 else 0
+            print(f"[SpaceMarkDecoder] Initialized for {wpm} WPM: dit={self._dit_length:.1f}ms, char_space={self.char_space:.1f}ms", file=sys.stderr)
+            print(f"[SpaceMarkDecoder] Morse tree navigation: start at index 1, dit=*2, dah=*2+1", file=sys.stderr)
 
         # Decoder state
         self.morse_ch = 1  # Current character in binary tree
@@ -364,6 +370,9 @@ class SpaceMarkDecoder:
         Returns:
             Decoded character(s) or None if character incomplete
         """
+        if DEBUG:
+            print(f"[SpaceMarkDecoder] Processing pair: space={space_ms:.1f}ms, mark={mark_ms:.1f}ms (tree pos={self.morse_ch})", file=sys.stderr)
+
         # Process the space
         space_result = self._decode_space(space_ms)
 
@@ -388,6 +397,8 @@ class SpaceMarkDecoder:
 
         # Check for end of character
         if duration > self.dit_length * 2.0:
+            if DEBUG:
+                print(f"[SpaceMarkDecoder] Space {duration:.1f}ms > threshold {self.dit_length * 2.0:.1f}ms - flushing character", file=sys.stderr)
             result = self._flush_character()
 
             # Determine if inter-char or inter-word space
@@ -400,10 +411,14 @@ class SpaceMarkDecoder:
                     result += " "
 
                 # Slow down char spacing slightly (helps with consistency)
+                old_char_space = self.char_space
                 self.char_space *= 1.03
                 space_type = 4  # INTER_WORD
+                if DEBUG:
+                    print(f"[SpaceMarkDecoder] INTER-WORD space detected, char_space: {old_char_space:.1f}ms -> {self.char_space:.1f}ms", file=sys.stderr)
             else:
                 # Inter-character space - adjust char_space adaptively
+                old_char_space = self.char_space
                 if duration < self.char_space:
                     # Approach smaller value quicker
                     self.char_space = self.char_space * 0.5 + duration * 0.5
@@ -411,6 +426,11 @@ class SpaceMarkDecoder:
                     # Approach larger value slower
                     self.char_space = self.char_space * 0.8 + duration * 0.2
                 space_type = 3  # INTER_CHAR
+                if DEBUG:
+                    print(f"[SpaceMarkDecoder] INTER-CHAR space detected, char_space: {old_char_space:.1f}ms -> {self.char_space:.1f}ms", file=sys.stderr)
+        else:
+            if DEBUG:
+                print(f"[SpaceMarkDecoder] INTER-ELEMENT space {duration:.1f}ms (threshold={self.dit_length * 2.0:.1f}ms)", file=sys.stderr)
 
         self._add_to_history(space_type, duration, is_mark=False)
         return result
@@ -422,23 +442,38 @@ class SpaceMarkDecoder:
         Args:
             duration: Mark duration in milliseconds
         """
+        old_morse_ch = self.morse_ch
         self.morse_ch *= 2
 
         # Determine dit or dah
         mark_type = 0  # DIT
+        mark_name = "DIT"
         if duration > self.dit_length * 1.7:
             mark_type = 1  # DAH
+            mark_name = "DAH"
             self.morse_ch += 1
+
+        if DEBUG:
+            # Build morse pattern so far for display
+            morse_pattern = self._get_morse_pattern()
+            print(f"[SpaceMarkDecoder] Decoded {mark_name} ({duration:.1f}ms, threshold={self.dit_length * 1.7:.1f}ms)", file=sys.stderr)
+            print(f"[SpaceMarkDecoder] Tree position: {old_morse_ch} -> {self.morse_ch}, pattern so far: {morse_pattern}", file=sys.stderr)
 
         # Adaptive learning: when current and last mark differ by 2X,
         # average and divide by 2 to get new dit length
         if duration > 2.0 * self.last_mark or self.last_mark > 2.0 * duration:
+            old_dit = self.dit_length
             new_dit = ((self.last_mark + duration) / 4.0 + self.dit_length) / 2.0
             self._dit_length = new_dit
 
             # Ensure char_space is at least 2.5 * dit_length
             if self.char_space < self.dit_length * 2.5:
+                old_char_space = self.char_space
                 self.char_space = self.dit_length * 2.5
+                if DEBUG:
+                    print(f"[SpaceMarkDecoder] ADAPTIVE: dit {old_dit:.1f}ms -> {new_dit:.1f}ms, char_space {old_char_space:.1f}ms -> {self.char_space:.1f}ms", file=sys.stderr)
+            elif DEBUG:
+                print(f"[SpaceMarkDecoder] ADAPTIVE: dit {old_dit:.1f}ms -> {new_dit:.1f}ms", file=sys.stderr)
 
         self.last_mark = duration
 
@@ -464,6 +499,8 @@ class SpaceMarkDecoder:
         self._clear_flush_timer()
 
         if self.morse_ch <= 1:
+            if DEBUG:
+                print(f"[SpaceMarkDecoder] Flush called but no character to flush (morse_ch={self.morse_ch})", file=sys.stderr)
             return None
 
         ch = "*"  # Unknown character marker
@@ -478,12 +515,19 @@ class SpaceMarkDecoder:
         elif self.morse_ch < len(MORSE_TREE):
             ch = MORSE_TREE[self.morse_ch]
 
+        if DEBUG:
+            morse_pattern = self._get_morse_pattern()
+            print(f"[SpaceMarkDecoder] FLUSHED CHARACTER: '{ch}' (pattern={morse_pattern}, tree_pos={self.morse_ch})", file=sys.stderr)
+            print(f"[SpaceMarkDecoder] Current timing: dit={self.dit_length:.1f}ms, char_space={self.char_space:.1f}ms, WPM={self.get_wpm_string()}", file=sys.stderr)
+
         self.decoded_text += ch
         self.morse_ch = 1
         return ch
 
     def _flush_timer_expired(self) -> None:
         """Callback when flush timer expires."""
+        if DEBUG:
+            print(f"[SpaceMarkDecoder] Auto-flush timer expired", file=sys.stderr)
         self._flush_character()
 
     def _clear_flush_timer(self) -> None:
@@ -492,6 +536,34 @@ class SpaceMarkDecoder:
             if self._flush_timer is not None:
                 self._flush_timer.cancel()
                 self._flush_timer = None
+
+    def _get_morse_pattern(self) -> str:
+        """
+        Get the morse pattern for the current tree position (for debugging).
+
+        Returns:
+            Morse pattern as string of '.' and '-'
+        """
+        if self.morse_ch <= 1:
+            return ""
+
+        # Trace back through the tree to build the pattern
+        # The position encodes the path: start at 1, dit=*2, dah=*2+1
+        pos = self.morse_ch
+        pattern = []
+
+        # Work backwards to build the pattern
+        while pos > 1:
+            if pos % 2 == 0:
+                # Even number = came from dit
+                pattern.insert(0, '.')
+                pos = pos // 2
+            else:
+                # Odd number = came from dah
+                pattern.insert(0, '-')
+                pos = (pos - 1) // 2
+
+        return ''.join(pattern)
 
     def _add_to_history(self, type_: int, duration: float, is_mark: bool) -> None:
         """
