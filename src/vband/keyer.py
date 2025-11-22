@@ -2,10 +2,15 @@
 
 import time
 import threading
+import sys
+import os
 from typing import Optional, Tuple, Callable
 from queue import Queue, Empty
 from .decoder import CWElement, SpaceMarkPair
 from .config import VBandConfig, PaddleType
+
+# Debug logging flag - set VBAND_DEBUG=1 environment variable to enable
+DEBUG = os.environ.get('VBAND_DEBUG', '0') == '1'
 
 
 class IambicKeyer:
@@ -242,6 +247,13 @@ class SpaceMarkKeyer:
 
         self._running = True
         self._start_time = self._get_ms()
+        if DEBUG:
+            dit_ms = self.config.dit_duration * 1000.0
+            wpm = round(1200.0 / dit_ms) if dit_ms > 0 else 0
+            print(f"[SpaceMarkKeyer] Starting keyer for {wpm} WPM (dit={dit_ms:.1f}ms)", file=sys.stderr)
+            print(f"[SpaceMarkKeyer] Paddle mode: {self.config.paddle_type.name}", file=sys.stderr)
+            print(f"[SpaceMarkKeyer] Initial state: {self._state} (0=IDLE, 1=MARK, 2=INTER_ELEMENT)", file=sys.stderr)
+
         self._thread = threading.Thread(target=self._keyer_loop, daemon=True)
         self._thread.start()
 
@@ -273,6 +285,8 @@ class SpaceMarkKeyer:
 
             # Update memory on press
             if not self._dit_pressed and dit_pressed:
+                if DEBUG:
+                    print(f"[SpaceMarkKeyer] Dit pressed, updating memory", file=sys.stderr)
                 if self.config.paddle_type == PaddleType.IAMBIC_A:
                     # In ultimatic mode, current is latest pressed
                     self._cur_paddle = DIT
@@ -280,6 +294,8 @@ class SpaceMarkKeyer:
                 self._reset_timeout()
 
             if not self._dah_pressed and dah_pressed:
+                if DEBUG:
+                    print(f"[SpaceMarkKeyer] Dah pressed, updating memory", file=sys.stderr)
                 if self.config.paddle_type == PaddleType.IAMBIC_A:
                     self._cur_paddle = DAH
                 self._paddle_memory[DAH] = True
@@ -287,6 +303,19 @@ class SpaceMarkKeyer:
 
             self._dit_pressed = dit_pressed
             self._dah_pressed = dah_pressed
+
+            if DEBUG and (dit_pressed or dah_pressed):
+                state_str = []
+                if dit_pressed:
+                    state_str.append("DIT")
+                if dah_pressed:
+                    state_str.append("DAH")
+                mem_str = []
+                if self._paddle_memory[DIT]:
+                    mem_str.append("DIT")
+                if self._paddle_memory[DAH]:
+                    mem_str.append("DAH")
+                print(f"[SpaceMarkKeyer] Paddle state: {'+'.join(state_str)}, memory: {'+'.join(mem_str) if mem_str else 'none'}", file=sys.stderr)
 
     def get_space_mark_pair(self, timeout: Optional[float] = None) -> Optional[SpaceMarkPair]:
         """
@@ -374,6 +403,10 @@ class SpaceMarkKeyer:
                     pair = SpaceMarkPair(space_duration, mark_duration)
                     self._pair_queue.put(pair)
 
+                    if DEBUG:
+                        mark_type = "DIT" if self._cur_paddle == DIT else "DAH"
+                        print(f"[SpaceMarkKeyer] Generated {mark_type}: space={space_duration:.1f}ms, mark={mark_duration:.1f}ms", file=sys.stderr)
+
                     self._start_time = self._get_ms()
                     self._start_timer(mark_duration)
                     break
@@ -402,6 +435,8 @@ class SpaceMarkKeyer:
                 # Output space/mark pair
                 pair = SpaceMarkPair(self._straight_space_time, last_time)
                 self._pair_queue.put(pair)
+                if DEBUG:
+                    print(f"[SpaceMarkKeyer] Straight key: space={self._straight_space_time:.1f}ms, mark={last_time:.1f}ms", file=sys.stderr)
 
     def _update_bug(self, dit_length: float) -> None:
         """Update bug mode (automatic dits, manual dahs)."""
@@ -440,6 +475,8 @@ class SpaceMarkKeyer:
                 # Output space/mark pair
                 pair = SpaceMarkPair(self._straight_space_time, last_time)
                 self._pair_queue.put(pair)
+                if DEBUG:
+                    print(f"[SpaceMarkKeyer] Bug mode: space={self._straight_space_time:.1f}ms, mark={last_time:.1f}ms", file=sys.stderr)
 
     def _start_timer(self, duration_ms: float) -> None:
         """Start the keyer timer."""

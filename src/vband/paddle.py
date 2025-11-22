@@ -2,10 +2,15 @@
 
 import time
 import threading
+import sys
+import os
 from typing import Callable, Optional, Dict, Tuple, TYPE_CHECKING
 from queue import Queue, Empty
 from pynput import keyboard
 from .config import VBandConfig, PaddleType
+
+# Debug logging flag - set VBAND_DEBUG=1 environment variable to enable
+DEBUG = os.environ.get('VBAND_DEBUG', '0') == '1'
 
 if TYPE_CHECKING:
     from .keyer import IambicKeyer
@@ -86,6 +91,11 @@ class PaddleInterface:
             return
 
         self._running = True
+        if DEBUG:
+            print(f"[PaddleInterface] Starting paddle interface", file=sys.stderr)
+            print(f"[PaddleInterface] Using {'SpaceMarkKeyer' if self._spacemark_keyer else 'IambicKeyer' if self._keyer else 'no keyer'}", file=sys.stderr)
+            print(f"[PaddleInterface] Paddle type: {self.config.paddle_type.name}", file=sys.stderr)
+
         self._listener = keyboard.Listener(
             on_press=self._on_key_press, on_release=self._on_key_release
         )
@@ -137,6 +147,8 @@ class PaddleInterface:
         if self._is_dit_key(key):
             # Debounce
             if current_time - self._last_dit_time < self.config.debounce_time:
+                if DEBUG:
+                    print(f"[PaddleInterface] DIT press debounced", file=sys.stderr)
                 return
             self._last_dit_time = current_time
 
@@ -144,6 +156,8 @@ class PaddleInterface:
                 self._dit_pressed = True
                 event = PaddleEvent(is_dit=True, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
+                if DEBUG:
+                    print(f"[PaddleInterface] DIT pressed at {current_time:.3f}s", file=sys.stderr)
 
                 # Update keyer state
                 if self._spacemark_keyer:
@@ -155,6 +169,8 @@ class PaddleInterface:
         elif self._is_dah_key(key):
             # Debounce
             if current_time - self._last_dah_time < self.config.debounce_time:
+                if DEBUG:
+                    print(f"[PaddleInterface] DAH press debounced", file=sys.stderr)
                 return
             self._last_dah_time = current_time
 
@@ -162,6 +178,8 @@ class PaddleInterface:
                 self._dah_pressed = True
                 event = PaddleEvent(is_dit=False, is_pressed=True, timestamp=current_time)
                 self._event_queue.put(event)
+                if DEBUG:
+                    print(f"[PaddleInterface] DAH pressed at {current_time:.3f}s", file=sys.stderr)
 
                 # Update keyer state
                 if self._spacemark_keyer:
@@ -187,6 +205,8 @@ class PaddleInterface:
                 self._dit_pressed = False
                 event = PaddleEvent(is_dit=True, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
+                if DEBUG:
+                    print(f"[PaddleInterface] DIT released at {current_time:.3f}s", file=sys.stderr)
 
                 # Update keyer state
                 if self._spacemark_keyer:
@@ -200,6 +220,8 @@ class PaddleInterface:
                 self._dah_pressed = False
                 event = PaddleEvent(is_dit=False, is_pressed=False, timestamp=current_time)
                 self._event_queue.put(event)
+                if DEBUG:
+                    print(f"[PaddleInterface] DAH released at {current_time:.3f}s", file=sys.stderr)
 
                 # Update keyer state
                 if self._spacemark_keyer:
