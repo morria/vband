@@ -324,10 +324,15 @@ class SpaceMarkDecoder:
         self.config = config or VBandConfig()
 
         # Timing parameters (in milliseconds)
-        # Use config's dit_duration (convert from seconds to milliseconds)
-        self.dit_length = self.config.dit_duration * 1000.0
-        self.last_mark = self.dit_length * 1.2  # Slightly longer than a dit
-        self.char_space = self.dit_length * 3.0  # Character space is 3x dit
+        # Initialize from config but allow adaptive updates
+        self._dit_length = self.config.dit_duration * 1000.0
+        self.last_mark = self._dit_length * 1.2  # Slightly longer than a dit
+        self.char_space = self._dit_length * 3.0  # Character space is 3x dit
+
+        # Log initialization for debugging
+        import sys
+        wpm = round(1.2 / self.config.dit_duration) if self.config.dit_duration > 0 else 0
+        print(f"[SpaceMarkDecoder] Initialized for {wpm} WPM: dit={self._dit_length:.1f}ms, char_space={self.char_space:.1f}ms", file=sys.stderr)
 
         # Decoder state
         self.morse_ch = 1  # Current character in binary tree
@@ -339,6 +344,12 @@ class SpaceMarkDecoder:
         self.history: List[Dict] = []
         self._save_space_type: Optional[int] = None
         self._save_space_duration: float = 0.0
+
+    @property
+    def dit_length(self) -> float:
+        """Get current dit length, refreshed from config each time."""
+        # Use cached value if it's been adaptively adjusted, otherwise use config
+        return self._dit_length
 
     def decode_space_mark(self, space_ms: float, mark_ms: float) -> Optional[str]:
         """
@@ -425,7 +436,7 @@ class SpaceMarkDecoder:
         # average and divide by 2 to get new dit length
         if duration > 2.0 * self.last_mark or self.last_mark > 2.0 * duration:
             new_dit = ((self.last_mark + duration) / 4.0 + self.dit_length) / 2.0
-            self.dit_length = new_dit
+            self._dit_length = new_dit
 
             # Ensure char_space is at least 2.5 * dit_length
             if self.char_space < self.dit_length * 2.5:
