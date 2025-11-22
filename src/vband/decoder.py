@@ -281,7 +281,7 @@ class MorseDecoder:
 # Each character's position in the tree is encoded by its morse pattern
 # Starting at index 1, left (dit) = 2*i, right (dah) = 2*i+1
 MORSE_TREE = (
-    "**ETIANMSURWDKGOHVF\x9cL\xc4PJBXCYZQ\xd6\xe454\x9d3\xc9*\xc22&\xc8+*\xde\xc3\xf434" +
+    "**ETIANMSURWDKGOHVF\x9cL\xc4PJBXCYZQ\xd6\xe454\x9d3\xc9*\xc22&\xc8+*\xde\xc3\xf4" +
     "16=/*\xc6^(*7\xbb\xe3\xd18*90" +
     "*****|******?_****\"*\xb6.****@***'**-********;!*)****\xb9,****:*******"
 )
