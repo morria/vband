@@ -300,6 +300,12 @@ class SpaceMarkStream:
 
                     # Decode the pair
                     char = self.decoder.decode_space_mark(pair.space_ms, pair.mark_ms)
+
+                    # Debug logging
+                    import sys
+                    if char is not None:
+                        print(f"\n[DEBUG] Decoded: {repr(char)}", file=sys.stderr)
+
                     if char and self.char_callback:
                         self.char_callback(char)
             else:
