@@ -398,8 +398,6 @@ class SpaceMarkDecoder:
                 # Inter-word space
                 if result:
                     result += " "
-                else:
-                    result = " "
 
                 # Slow down char spacing slightly (helps with consistency)
                 self.char_space *= 1.03
